@@ -1,0 +1,324 @@
+*  HMC
+** introduction
+mips 主要用于嵌入式 embeded application,mips 处理器是 RISC 风格，相对于 CISC 风格（如 INTEL 的 X86）,它有更少的指令类别和寻址方式，后由于 RISC 相对于 CISC 优势明显，Intel 和ＡＭＤ的 X86 处理器变成 RISC-LIKE 风格，实现了 RISC 的执行和 CISC 的微代码执行。
+MIPS R2000 running at 8MHZ on 2.0 micron process
+MIPS R3000 running at 40MHZ 0n 1.2 micron process
+MIPS R2000 supported 32 KB data cache and 64KB instruction cache
+MIPS R3000 supported 64KB data cache and 64 KB instruction cache
+HMC 设计的 cache 是 512Byte 的数据 cache,和 512 Byte 的指令 cache
+HMC 设计的数据和指令 cache 是片上 cache，而 MIPS R2000  和 MIPS R3000 是用的外部存储器芯片作为处理器的 cache 同时有 cache 控制器。
+本次设计的 MIPS 结构，包括 32 个通用寄存器和５８条指令
+**  regfile 的写法
+#+BEGIN_SRC  verilog
+reg [31:0] regfile [31:0];
+always @ (negedge clk)
+ if(regwrite)
+regfile[regdst] <= writedata;
+assign #1 readdata1 = (rs != 0)? regfile[rs] : 0;
+assign #1 readdata2 = (rt != 0)? regfile[rt] : 0; 
+
+#+END_SRC
+** 延时的写法
+#+BEGIN_SRC verilog
+assign #1  readdata2 = (rt != 0)? regfile[rt] : 0; 
+
+  always@( * )
+    case(control[2:0])
+      3'b000: aluresult <= #1 a & b;      // and
+      3'b001: aluresult <= #1 aorb;       // or
+      3'b010: aluresult <= #1 sum;        // add
+      3'b110: aluresult <= #1 sum;        // sub
+      3'b111: aluresult <= #1 sltSigned;  // slt signed
+      3'b011: aluresult <= #1 sltUnsigned;// slt unsigned
+      3'b100: aluresult <= #1 a ^ b;      // xor
+      3'b101: aluresult <= #1 ~aorb;      // nor
+    endcase
+
+#+END_SRC
+** 写 verilog 严格按照硬件的组成，
+例如：硬件中减法是通过加法实现的 a-b=a+1+(~b)，相应的延时就比与或等一个门的延时多，
+#+BEGIN_SRC verilog
+assign #1 b2 = control[2] ? ~b:b; //control[2]=1 时为减法为 0 时为加法
+assign #1 sum = a + b2 + control[2];
+assign #1 sltSigned = sum[31];//有符号数的小于置 1
+// a < b in Verilog is an unsigned comparison
+assign #1 sltUnsigned = a < b;//无符号数的小于置 1 因为减法和有符号数的小于置 1control[2] 均为 1
+assign #1 aorb = a | b;求或非得先求出或，再非两个门延迟
+assign #1 overflow = (a[31] == b2[31] & a[31] != sum[31]);//判断溢出的条件是两个运算数运算的符号相同且运算结果与 n 运算数的符号不同
+
+master <= reset ? 0 : (clear ? 0 : (en ? d : q));
+
+#+END_SRC
+不用 if else
+jump and link 与 jump register ｉｓa couple
+** 大量用到了多路选择器
+>>逻辑右移>>>算术右移
+** IF 阶段
+*** pc 来源
+ID 段选择的跳转地址，PC+4，RESETVECTORUNCACHED，EXCEPTIONVECTORUNCACHED，构成四选一多路选择器控制信号为 pcsrcFD,
+其命名规则中 UNCACHED 表示不在 cache 中的异常，不支持 cache 异常。
+*** PCreg
+#+BEGIN_SRC verilog
+module flopen #(parameter WIDTH = 32)
+               (input                  ph1,ph2,
+                input                  en,
+                input      [WIDTH-1:0] d, 
+                output reg [WIDTH-1:0] q);
+ 
+  reg [WIDTH-1:0] master;
+
+  always @(ph2, en, d, q)
+    if (ph2) #1 master <= en ? d : q;
+
+  always @(ph1, master)
+    if (ph1) #1 q <= master;
+endmodule
+
+#+END_SRC
+调用子模块，en 为～stall，ph1 为 clock,ph2 为，d 为下一个 Pc 值，P 为原 Pc 值，本应该是在 ph1 上升沿的时候改变 pc 的值，
+
+IF 阶段还需要检测是否指令对齐
+
+
+** ID 阶段
+***  符号位的拓展
+拓展部件分为有符号位的拓展和无符号位的拓展，由是使能信号 enable 决定，enable 为 1 时即为有符号位的拓展，为 0 时是无符号位的拓展
+#+BEGIN_SRC verilog
+module signext #(parameter INPUT = 16, OUTPUT = 32)
+               (input  [INPUT-1:0] a,
+               input  enable,
+               output [OUTPUT-1:0] y);
+               
+  wire extension;
+  
+  assign #1 extension = (enable ? a[INPUT-1] : 0);
+  assign #1 y = {{OUTPUT-INPUT{extension}}, a};//将 extension 重复 output-input 次
+endmodule
+
+#+END_SRC
+*** branch 分支的比较
+本应是 readdata1 和 readdata2 的比较，但要加入转发来的数值，HMC 比较的值除 readdata1,readtata2 外加了一路转发，转发来源是 aluoutM 即 mem 阶段的 aluout,为什么没有 EX 阶段的转发？
+*** 为什么要比较 srca2D 大于 0，还是小于 0，还是等于 0
+bgez:branch greater than equal zero
+bgtz:branch greater tahn zero
+bgezal:branch greater than equal zero and link 
+blez:branch less than equal zero
+bltz:branch less than zero
+blezal:branch less than zero and link
+即总共有：大于等于０分支，小于０分支，大于０分支，小于等于０分支，大于等于０分支并链接，小于０分支并链接
+所有的比较均是用 R[rs]和０进行，所以要比较Ｒ【rs】与０的各种关系，带链接的分支的同时将下一条指令的地址放于$31 中
+
+*** jump,branch,jumpregister
+jumpregister 的跳转地址是 rs 寄存器中的内容，所以为 srca2D,其与 branchaddr,jumpaddr 共同为一个三选一多路选择器的输入，控制三选一多路选择器的是 pcbranchsrcD
+
+*** 异常检测　
+ＩＤ段检测的异常包括：断点 breakpoint,系统调用 system call,无效的操作码　invalid opcode,浮点 FPU
+** ex 阶段
+***  移位运算 
+逻辑左移  ：shift left logical(sll rd rt shamt 且小鸡蛋译码后的控制线为 110)
+可变逻辑左移 shift left logical variable(sllv rd rt rs 控制线为 010) 
+逻辑右移  ：shift right logical(srl rd rt shamt 控制线为 100)
+可变逻辑右移 shift right logical variable(srlv rd rt rs 控制线为 000)
+算术右移：shift right arithmetic(sra rd rt shamt 控制线为 101)
+可变算术右移：shift right arithmetic variable(srav rd rt rs 控制线为 001)
+用大量的 if else 语句会引起死锁问题，HMC 用的最多的就是多路选择器，实现移位运算也是如此，先是多路选择偏移量（用一个三选一多路选择，可以看出偏移量时 rs 还是 shamt 取决于 control[2],control[2]为 1 时为正常的移位运算偏移量 shamt,control[2]为 0 时是可变的移位运算偏移量为 rs,HMC 加如一个偏移量为 10000 即 16 的偏移量用于 LUI(load upper immediate R[rt] = {imm,16'b0})所以三选一多路选择器控制为{lui,control[2]},00--rs,01--shamt,10--16，此三选一输出为所需的偏移量），再用一个三选一多路选择器选择进行什么移位，逻辑左移，逻辑右移,算术右移等，控制线为 control[1:0],00--逻辑右移，01--算术右移，10--逻辑左移。
+#+BEGIN_SRC verilog
+ wire [31:0] leftlogical, rightlogical, rightarithmetic;
+  wire [4:0] shiftamount;
+
+  assign leftlogical      = b << shiftamount;//逻辑左移
+  assign rightlogical     = b >> shiftamount;//逻辑右移
+  assign rightarithmetic = b >>> shiftamount;//算术右移 rightarithmetic
+
+  // The control bits are: {constant, left, rightassociative}
+ 
+  mux3 #(5)  shamtmux(a[4:0],     // Variable shift taken from a register
+                      constshift, // Shift taken from the immediate value
+                      5'b10000,   // LUI always shifts by 16
+                      {lui, control[2]}, shiftamount);
+
+  mux3 #(32) shresmux(rightlogical, rightarithmetic, leftlogical, control[1:0],
+                      shiftresult);
+
+#+END_SRC 
+最多可以移位 32 位，用二进制 5bit 表示，所以 rs[4：0]，
+***  乘除部件
+在除法中，ｈｉ中放的是余数，ＬＯ中放的是上商，在乘法中，
+**** 乘法(multipication)
+multiplying 0010 by 0110,=2*6,则００１０是被乘数 multiplicand,0110 是乘数 multiplier,z 最后结果是乘积 product,过程中会产生中间积 intermediate
+对于有符号数的乘法，用布什算法计算，Booth's algorithm
+首先，multiplicand 放在被乘数部件中（３２比特），multiplier 乘数放在 product 乘积部件的右面即低３２位，乘积部件共６４位，布什算法将 multiplier 乘数后面加了一个０，每次运算从右向左取 multipler 的两位。
+步骤：
+１．从右向左 multiplier 的值：
+00:no operation
+01:add the multiplicand to the left half of the product
+10:subtract the multiplicand to the left half of the product
+11:no operation
+２．将 product 向右移一位注意是算术右移
+乘法的结果为｛hi,lo｝
+步骤运算的次数等于乘数或被乘数的位数
+例如：
+| Iteration | step                          | multiplicand | product     |
+|-----------+-------------------------------+--------------+-------------|
+|         0 | initial value                 |         0010 | 0000 0110 0 |
+|         1 | 00:no operation               |         0010 | 0000 0110 0 |
+|           | shift right product           |         0010 | 0000 0011 0 |
+|         2 | 10:prod = prod - multiplicand |         0010 | 1110 0011 0 |//减法和加法都是对 product 高位进行运算，加法时直接加在高位即可，减法时将 multiplicand 从右向左数第一个１的左面位数值均取反，此１及右面的位数值保持不变，并将变换后的 multiplicand 加到 product 的高位
+|           | shift right product           |         0010 | 1111 0001 1 |
+|         3 | 11:no operation               |         0010 | 1111 0001 1 |
+|           | shift right product           |         0010 | 1111 1000 1 |
+|         4 | 01:prod = prod + multiplicand |         0010 | 0001 1000 1 |
+|           | shift right product           |         0010 | 0000 1100 0 |
+乘数被乘数均为４位所以经过４步迭代最后结果为：００００　１１００　＝１２（ten）
+有符号数的减法通用：a - b = a + 1 +~b 相当于将 b 从右向左数第一位１左面的数值均取反，１和右面的数值保持不变，并将变换后的 b 加到 a 上
+**** 除法 division
+dividing 7 by 2=7/2,7 为被除数 dividend，２为除数 divisor 注意不是 divisior
+除法结果后有上商 quotient,余数 remainder
+dividend = quotient*divisor+remainder
+初始化：ｒｅｍａｉｎｄｅｒ６４位，低３２位放ｄｉｖｉｄｅｎｄ，ｑｕｏｔｉｅｎｔ３２位，初始化为０，dｉｖｉｓｏｒ６４位高３２位放 dｉｖｉｓｏｒ
+步骤：
+１．ｒｅｍａｉｎｄｅｒ＝　ｒｅｍａｉｎｄｅｒ－Dｉｖｉｓｏｒ
+２．ｒｅｍａｉｎｄｅｒ>= 0? 将ｑｕｏｔｉｅｎｔ左移一位并将最右位置１：恢复ｒｅｍａｉｎｄｅｒ，将ｑｕｏｔｉｅｎｔ左移一位并将最右位置０
+３．将 dｖｉｓｏｒ右移一位重复１
+重复１２３步骤３３次即为结果
+例如：７／２
+| Iteration | step                                                         | quotient |  divisor | remainder |
+|-----------+--------------------------------------------------------------+----------+----------+-----------|
+|         0 | initial                                                      |     0000 | 00100000 |  00000111 |
+|         1 | rem= rem-divisor                                             |     0000 | 00100000 |  11100111 |
+|           | rem<0:  recover remainder and shift left and assign quotient |     0000 | 00100000 |  00000111 |
+|           | shift  divisor                                               |     0000 | 00010000 |  00000111 |
+|         2 | rem= rem-divisor                                             |     0000 | 00010000 |  11110111 |
+|           | rem<0:  recover remainder and shift left and assign quotient |     0000 | 00010000 |  00000111 |
+|           | shift  divisor                                               |     0000 | 00001000 |  00000111 |
+|         3 | rem= rem-divisor                                             |     0000 | 00001000 |  11111111 |
+|           | rem<0:  recover remainder andshift left and  assign quotient |     0000 | 00001000 |  00000111 |
+|           | shift  divisor                                               |     0000 | 00000100 |  00000111 |
+|         4 | rem= rem-divisor                                             |     0000 | 00000100 |  00000011 |
+|           | rem>0: shift left and assign quotient                        |     0001 | 00000100 |  00000011 |
+|           | shift  divisor                                               |     0001 | 00000010 |  00000011 |
+|         5 | rem= rem-divisor                                             |     0001 | 00000010 |  00000001 |
+|           | rem>0: shift left and assign quotient                        |     0011 | 00000010 |  00000001 |
+|           | shift  divisor                                               |     0011 | 00000001 |  00000001 |
+则余数 remainder 为１，上商 quotient 为３
+有符号数的除法：被除数 dividend 和余数 remainder 的符号必须一致，若被除数 dividend 和除数 divisor 符号不一致将上商 quotient 取非（取反加１）
+
+
+
+*** alu 部件
+alu 的运算由小鸡蛋译码后的数据控制，control[2:0]共 8 种可能运算，如下：
+#+BEGIN_SRC verilog
+ case(control[2:0])
+      3'b000: aluresult <= #1 a & b;      // and
+      3'b001: aluresult <= #1 aorb;       // or
+      3'b010: aluresult <= #1 sum;        // add
+      3'b110: aluresult <= #1 sum;        // sub
+      3'b111: aluresult <= #1 sltSigned;  // slt signed
+      3'b011: aluresult <= #1 sltUnsigned;// slt unsigned
+      3'b100: aluresult <= #1 a ^ b;      // xor
+      3'b101: aluresult <= #1 ~aorb;      // nor
+    endcase
+
+#+END_SRC
+其中加减都有不考虑溢出的情况，addu,subu,控制由 opcode 实现
+减法由加法实现，a-b=a+~b+1
+#+BEGIN_SRC verilog
+ assign #1 b2 = control[2] ? ~b:b; 
+  assign #1 sum = a + b2 + control[2];
+  assign #1 sltSigned = sum[31];
+  // a < b in Verilog is an unsigned comparison
+  assign #1 sltUnsigned = a < b;
+  assign #1 aorb = a | b;
+
+  assign #1 overflow = (a[31] == b2[31] & a[31] != sum[31]);
+
+#+END_SRC
+slt 是有符号数的运算，其判断小于大于应有减法之后的符号位判断，sltu 是无符号数的 运算，可以直接 a<b 判断
+加减法由 control[2]控制，可以用上述方法同时实现加减法，判断溢出为同符号数的运算结果异符号。或非用两个门实现应分开写，保证延迟正确
+***  输出
+alu 运算结果，shift 运算结果，乘除运算结果，pc+8 中选择一个结果作为写回寄存器或者写存储器的地址（pc+8 是 jump and link 或者 jump and link register 后返回的地址，即调用子程序完成后返回主程序的地址，由于 jump 指令在第二个周期 ID 段进行跳转后在 EX 阶段将 ID 段指令的下一条指令写回寄存器$31,或者 rd,jal 时写入$31,jalr 时写入$rd,设 EX 段指令地址为 PC,则 ID 段为 PC+4，ID 段的下一条指令即为 PC+8）
+jump and link
+jal target 是 J 格式的指令，target 是 26 位，Unconditionally jump to the instruction at target,save the address of the next instruction in register $31（$ra）
+jump and ink register R 格式的指令
+jalr rs, rd
+Unconditionally jump to the instruction whose address is in $rs,and save the next instruction address in  $rd
+jump register R 格式的指令
+jr rs
+Unconditionally jumo to the insruction whose address is in $rs
+输出：
+
+    aluout:写回寄存器的值或者访问存储器的值
+    misalignedwE:字未对齐信号
+    misalignedhE:半字未对齐信号
+    overflow:溢出信号
+    mdrunE:标识乘除部件是否正在运行（high）或者已经完成（low）
+    srcb2E:rt 的值 sw 时存回存储器的数值
+    
+*** 异常检测并完成异常处理
+Ex 段需要检测异常 misaligned load 和 misaligned store,arithmetic overflow
+选择的 aluoutE 可能为访问存储器的地址，字（有 4 个字节）对齐时 地址 A mod 4 =0,即地址为 4 的倍数，aluout[1]与 aluout[0]均应为 0
+半字对齐 时，地址 A mod 2 =0，即地址为 2 的倍数，aluout[0] =0,
+ assign misalignedwE = aluoutE[1] | aluoutE[0];
+  assign misalignedhE = aluoutE[0];
+overflow 在 alu 中已经检测 assign #1 overflow = (a[31] == b2[31] & a[31] != sum[31]);
+
+
+** mem 阶段
+** coprocessor0
+*** status 寄存器
+status[31:0],其中 status【15:0】 为 pending interrupt 位，对应于 cause 寄存器中的 interrupt mask 位，status[4]为 usermode，status[1]为 exception level,status【0】为 interrupt enable.
+寄存器更新数据的时候均需要有时钟信号，和写信号有效，其里面的内容怎么赋值的不大清楚
+*** cause 寄存器
+file:/home/pic/causestatus.jpg
+*** epc 单元
+exception program counter 用于存放发生异常的指令的地址
+epc 来源有俩个，一个是 ID，EX 段检测到的ＩＤ，EX 段的指令的异常，而异常处理在 EX 段，所以一个来源是当前指令，另一个来源是分支延迟槽中的指令发生异常，为什么分支延迟槽的指令发生异常ＥＰＣ就应该指向ＰＣＥ－４？
+
+
+
+** exception
+一般来说中断的优先级小于异常，HMC 中包含的异常有断点，系统调用，无效的操作码，算术溢出，检测 FP 指令，存储器 load 没有对齐，存储器 store 没有对齐，中断
+定义各个异常的优先级
+module prienc_8 (input       [7:0]  a,
+                  output reg [2:0]  y);
+   always @ ( * )
+    casex(a)
+      // rearrange to set priority.
+      8'b1xxxxxxx : y <= 3'b000;
+      8'b01xxxxxx : y <= 3'b001;
+      8'b001xxxxx : y <= 3'b010;
+      8'b0001xxxx : y <= 3'b011;
+      8'b00001xxx : y <= 3'b100;
+      8'b000001xx : y <= 3'b101;
+      8'b0000001x : y <= 3'b110;
+      8'b00000001 : y <= 3'b111;
+      default    : y <= 3'bxxx;
+    endcase
+endmodule
+输入的【7;0】 8 个比特位每个比特位分别对应一个异常的标示，优先级从高到低，casex 比较的时候不比较 x，case 是精确的比较，caseZ 比较的时候不比较 Z
+调用优先级函数并将 000--111 分别对应于 exceptioncode
+  prienc_8  excprienc({interrupt, overflow, adel, ades, syscallE, breakE, 
+                        riE, fpuE}, priencout);
+   分别对应于异常：中断，算术溢出，load 访问存储器没有对齐，store 访问存储器没有对齐，系统调用，断点，无效的操作码，浮点指令                    
+  // Take the results of that encoder into mux 8 to set the cause register
+  always @ ( * ) 
+#+BEGIN_SRC verilog
+    casex(priencout)
+      3'b000 : exccode <= 5'b00001;
+      3'b001 : exccode <= 5'b01100;
+      3'b010 : exccode <= 5'b00100;
+      3'b011 : exccode <= 5'b00101;
+      3'b100 : exccode <= 5'b01000;
+      3'b101 : exccode <= 5'b01001;
+      3'b110 : exccode <= 5'b01010;
+      3'b111 : exccode <= 5'b01011;
+    endcase
+
+
+
+
+
+
+
+
+#+END_SRC
