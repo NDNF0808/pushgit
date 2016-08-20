@@ -1,0 +1,166 @@
+* mips
+** mips 寄存器组
+*** cpu寄存器
+寄存器组分为体系结构结构寄存器组和非体系结构寄存器阻，体系结构寄存器组是程序员可见的。非体系结构寄存器阻是程序员不可见的
+体系结构寄存器：
+| NAME    | NUMBER | USE                                                     | comment                                                                              |
+|---------+--------+---------------------------------------------------------+--------------------------------------------------------------------------------------|
+| zero    | 0      | the constant value 0                                    | use for compare with 0,anyway it is a constant for use                               |
+| $at     | 1      | reserved for assembler                                  |                                                                                      |
+| $v0~$v1 | 2~3    | function returns and  $v0 contain the number of syscall | subfunction return values                                                            |
+| $a0~$a3 | 4~7    | arguments                                               | transfer arguments from the main function to subfunction                             |
+| $t0~$t7 | 8~15   | general purpose register                                |                                                                                      |
+| $S0~$S7 | 16~23  | general purpose register                                |                                                                                      |
+| $t8~$t9 | 24~25  | general purpose register                                |                                                                                      |
+| $k0~$k1 | 26~27  | reserved for kernel os                                  |                                                                                      |
+| $gp     | 28     | global point                                            |                                                                                      |
+| $sp     | 29     | stack point                                             |                                                                                      |
+| $fp     | 30     | frame point                                             |                                                                                      |
+| $ra     | 31     | return address                                          | use for save the address of mainfunction for return from sunfunction to mainfunction |
+PC:program counter 程序计数器，存放指令的地址
+IR:instruction register 指令寄存器
+HI:乘除部件中存放乘除的结果，除法中存放余数
+LO:乘除部件中存放乘除的结果，除法中存放上商
+*** coprocessor0协处理器０寄存器
+体系结构寄存器：
+协处理器０是异常处理单元有寄存器个数为３２个
+　 Register 0: Index，作为MMU的索引用。ＭＭＵ是memory management unitl内存管理单元
+　　Register 2, EntryLo0，访问TLB Entry偶数页中的地址低32Bit用。同上，在MMU和TLB的相关章节中详解。
+　　Register 3, EntryLo1，访问TLB Entry奇数页中的地址低32Bit用。
+　　Register 4, Context，用以加速TLB Miss异常的处理。
+　　Register 5, PageMask，用以在MMU中分配可变大小的内存页。
+　　Register 8, BadVAddr，在系统捕获到TLB Miss或Address Error这两种Exception时，发生错误的虚拟地址会储存在该寄存器中。对于引发Exception的Bug的定位来说，这个寄存器非常重要。
+　　Register 9, Count，这个寄存器是R4000以后的MIPS系统引入的。它是一个计数器，计数频率是系统主频的1/2。BCM1125/1250，RMI XLR系列以及Octeon的Cavium处理器均支持该寄存器。
+　　　　　　　　　　　　　　　　对于操作系统来说，可以通过读取该寄存器的值来获取tick的时基。在系统性能测试中，利用该寄存器也可以实现打点计数。
+　　Register 10，EntryHi，这个寄存器同EntryLo0/1一样，用于MMU中。以后会详述。
+　　Register 11，Compare，配合Count使用。当Compare和Count的值相等的时候，会触发一个硬件中断(Hardware Interrupt)，并且总是使用Cause寄存器的IP7位。
+　　Register 12，Status，用于处理器状态的控制。
+　　Register 13，Cause，这个寄存器体现了处理器异常发生的原因。
+　　Register 14，EPC，这个寄存器存放异常发生时，系统正在执行的指令的地址。
+　　Register 15，PRID，这个寄存器是只读的，标识处理器的版本信息。向其中写入无意义。
+　　Register 18/19，WatchLo/WatchHi，这对寄存器用于设置硬件数据断点(Hardware Data Breakpoint)。该断点一旦设定，当CPU存取这个地址时，系统就会发生一个异常。这个功能广泛应用于调试定位内存写坏的错误。
+　　Register 28/29，TagLo和TagHi，用于高速缓存(Cache)管理。
+常用的就是
+status:状态寄存器
+cause:原因寄存器
+EPC:exception program counter 存放异常指令的地址
+BadVAddr:用于虚拟存储器存放访问不存在地址
+*** coprocessor1协处理器１寄存器
+体系结构有寄存器：
+协处理器１是浮点计算单元
+３２个单精度浮点寄存器，或者可以组合成１６个双精度浮点寄存器
+** mips异常类型与特征
+常用的异常类型有１２种
+| type                                    | synchronous or asynchronous | user request or coerced | user maskable or user nonmaskable | within instructions or between instructions | resume or terminate |
+|-----------------------------------------+-----------------------------+-------------------------+-----------------------------------+---------------------------------------------+---------------------|
+| I/O device request                      | asynchronous                | coerced                 | user nonmaskable                  | between instructions                        | resume              |
+| integer arithmetic overflow             | synchronous                 | coerced                 | user maskable                     | within instructions                         | resume              |
+| floating point anomaly                  | synchronous                 | coerced                 | user maskable                     | within instructions                         | resume              |
+| invoking os service from a user program | synchronous                 | user request            | user nonmaskable                  | between instructions                        | resume              |
+| violate memory protection               | synchronous                 | coerced                 | user nonmaskable                  | within instructions                         | resume              |
+| memory access misaligned                | synchronous                 | coerced                 | user maskable                     | within instructions                         | resume              |
+| undefined instructions                  | synchronous                 | coerced                 | user nonmaskable                  | within instructions                         | terminate           |
+| power failure                           | asynchronous                | coerced                 | user nonmaskable                  | within instructions                         | terminate           |
+| page fault                              | synchronous                 | coerced                 | user nonmaskable                  | within instructions                         | resume              |
+| hardware malfunction                    | asynchronous                | coerced                 | user nonmaskable                  | within instructions                         | terminate           |
+| breakpoint                              | synchronous                 | user request            | user maskable                     | between instructions                        | resume              |
+| tracing instruction execution           | synchronous                 | user request            | user maskable                     | bteween instructions                        | resume              |
+
+
+
+**  乘除法
+在除法中，ｈｉ中放的是余数，ＬＯ中放的是上商，在乘法中，hi和lo共同放乘法的结果
+**** 乘法(multipication)
+multiplying 0010 by 0110,=2*6,则００１０是被乘数 multiplicand,0110 是乘数 multiplier,最后结果是乘积 product,过程中会产生中间积 intermediate
+对于有符号数的乘法，用布什算法计算，Booth's algorithm
+首先，multiplicand 放在被乘数部件中（３２比特），multiplier 乘数放在 product 乘积部件的右面即低３２位，乘积部件共６４位，布什算法将 multiplier 乘数后面加了一个０，每次运算从右向左取 multipler 的两位。
+步骤：
+１．从右向左 multiplier 的值：
+00:no operation
+01:add the multiplicand to the left half of the product
+10:subtract the multiplicand to the left half of the product
+11:no operation
+２．将 product 向右移一位注意是算术右移
+乘法的结果为｛hi,lo｝
+步骤运算的次数等于乘数或被乘数的位数
+例如：
+| Iteration | step                          | multiplicand | product     |                                                                                                                                                                                                        |
+|-----------+-------------------------------+--------------+-------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+|         0 | initial value                 |         0010 | 0000 0110 0 |                                                                                                                                                                                                        |
+|         1 | 00:no operation               |         0010 | 0000 0110 0 |                                                                                                                                                                                                        |
+|           | shift right product           |         0010 | 0000 0011 0 |                                                                                                                                                                                                        |
+|         2 | 10:prod = prod - multiplicand |         0010 | 1110 0011 0 | //减法和加法都是对 product 高位进行运算，加法时直接加在高位即可，减法时将 multiplicand 从右向左数第一个１的左面位数值均取反，此１及右面的位数值保持不变，并将变换后的 multiplicand 加到 product 的高位 |
+|           | shift right product           |         0010 | 1111 0001 1 |                                                                                                                                                                                                        |
+|         3 | 11:no operation               |         0010 | 1111 0001 1 |                                                                                                                                                                                                        |
+|           | shift right product           |         0010 | 1111 1000 1 |                                                                                                                                                                                                        |
+|         4 | 01:prod = prod + multiplicand |         0010 | 0001 1000 1 |                                                                                                                                                                                                        |
+|           | shift right product           |         0010 | 0000 1100 0 |                                                                                                                                                                                                        |
+乘数被乘数均为４位所以经过４步迭代最后结果为：００００　１１００　＝１２（ten）
+有符号数的减法通用：a - b = a + 1 +~b 相当于将 b 从右向左数第一位１左面的数值均取反，１和右面的数值保持不变，并将变换后的 b 加到 a 上
+**** 除法 division
+dividing 7 by 2=7/2,7 为被除数 dividend，２为除数 divisor 注意不是 divisior
+除法结果后有上商 quotient,余数 remainder
+dividend = quotient*divisor+remainder
+初始化：ｒｅｍａｉｎｄｅｒ６４位，低３２位放ｄｉｖｉｄｅｎｄ，ｑｕｏｔｉｅｎｔ３２位，初始化为０，dｉｖｉｓｏｒ６４位高３２位放 dｉｖｉｓｏｒ
+步骤：
+１．ｒｅｍａｉｎｄｅｒ＝　ｒｅｍａｉｎｄｅｒ－Dｉｖｉｓｏｒ
+２．ｒｅｍａｉｎｄｅｒ>= 0? 将ｑｕｏｔｉｅｎｔ左移一位并将最右位置１：恢复ｒｅｍａｉｎｄｅｒ，将ｑｕｏｔｉｅｎｔ左移一位并将最右位置０
+３．将 dｖｉｓｏｒ右移一位重复１
+重复１２３步骤３３次即为结果
+例如：７／２
+| Iteration | step                                                         | quotient |  divisor | remainder |
+|-----------+--------------------------------------------------------------+----------+----------+-----------|
+|         0 | initial                                                      |     0000 | 00100000 |  00000111 |
+|         1 | rem= rem-divisor                                             |     0000 | 00100000 |  11100111 |
+|           | rem<0:  recover remainder and shift left and assign quotient |     0000 | 00100000 |  00000111 |
+|           | shift  divisor                                               |     0000 | 00010000 |  00000111 |
+|         2 | rem= rem-divisor                                             |     0000 | 00010000 |  11110111 |
+|           | rem<0:  recover remainder and shift left and assign quotient |     0000 | 00010000 |  00000111 |
+|           | shift  divisor                                               |     0000 | 00001000 |  00000111 |
+|         3 | rem= rem-divisor                                             |     0000 | 00001000 |  11111111 |
+|           | rem<0:  recover remainder andshift left and  assign quotient |     0000 | 00001000 |  00000111 |
+|           | shift  divisor                                               |     0000 | 00000100 |  00000111 |
+|         4 | rem= rem-divisor                                             |     0000 | 00000100 |  00000011 |
+|           | rem>0: shift left and assign quotient                        |     0001 | 00000100 |  00000011 |
+|           | shift  divisor                                               |     0001 | 00000010 |  00000011 |
+|         5 | rem= rem-divisor                                             |     0001 | 00000010 |  00000001 |
+|           | rem>0: shift left and assign quotient                        |     0011 | 00000010 |  00000001 |
+|           | shift  divisor                                               |     0011 | 00000001 |  00000001 |
+则余数 remainder 为１，上商 quotient 为３
+有符号数的除法：被除数 dividend 和余数 remainder 的符号必须一致，若被除数 dividend 和除数 divisor 符号不一致将上商 quotient 取非（取反加１）
+
+
+** 虚拟内存（ＭＭＵ，ＴＬＢ）
+*** 发展
+１．早期的程序直接运行在物理内存上，程序在运行时访问的地址都是物理地址，例如：程序运行时pc中的值就是物理地址，这种程序直接运行在物理内存上的方式简单，但并不适用于复杂的系统，尤其是多任务的操作系统。
+　　其缺点有：
+　　　　　　１）物理内存不足，一个程序运行时可能需要６４ＫＢ空间而其内存只有３２ＫＢ。
+　　　　　　２）程序运行的地址不确定，同一个程序每次被装载的内存地址可能不同。
+　　　　　　３）内存利用率低，要运行一个程序需要把程序整个装入内存。
+　　　　　　４）对于多任务的ＯＳ存在进程间地址空间不隔离的问题。
+２．随着计算机的发展，应用程序的规模增大，当内存容纳不下该程序时，将程序分成一定数量的覆盖快（overlay），覆盖快０运行完成时调用覆盖快１，覆盖块需要程序员划分，覆盖块的调用由操作系统完成。程序员的任务繁重，费时费力，
+３．虚拟内存管理技术
+　　3.1基本思想是程序，数据，堆栈的总的大小可以超过内存的大小，o操作系统将当前使用的内容保留在内存中，剩下的部分保留在磁盘中，需要的时候进行替换，操作系统的内核是常驻内存的，
+　　   例如：有一台可以生成１６位地址的机器，则其虚拟内存为２**16＝６４ＫＢ而这台机器有３２ＫＢ的内存需要１５个比特位，那么这台机器就得有６４ＫＢ的外部存储器。虚拟地址１６位，前４位是页号，后１２位是偏移量，
+　　   则页大小为2**12=4KB,虚拟页个数为2**4=16个页，对应的物理地址中页框大小必须与页的大小保持一致即为４ＫＢ，１５位物理地址中有１２位是页偏移量，剩下的３位是页框号，即页框的个数为８，也就是说１６个页对应的页框数是８
+　　3.2对于指令：Move reg,20500
+   　  虚拟地址２０５００对应于虚拟页 号５，（虚拟页号５的范围是２０４８０－２４５７５），虚拟页２０５００对应于页号５距离开头２０字节处，由于虚拟页号５对应的物理页框号是３（１２２８８－１６３８３），所以物理地址是
+　　  １２２８８＋２０＝１２３０８，该虚拟地址到物理地址的转换过程由ＭＭＵ完成。ＭＭＵ完成后将物理地址传到总线，内存对于ＭＭＵ的转换一无所知
+　　  通过适当的设置ＭＭＵ可以使１６个页稳射到８个页框，这就解决了上述问题中程序运行地址不稳定的问题。
+　　  毕竟有１６个页，８个页框，总有页未映射到内存中，这时访问该页就会产生一个page fault,这时ＯＳ必须处理这个故障，它从８个页框中找到一个很少被使用的页框，并将该页框的内容写入外部存储器即辅存，将缺页的页重新映射到该页框，并修改相关页表。
+　　3.3虚拟地址空间由cpu的位数决定，如３２位的cpu则其虚拟地址空间为0x00000000－0xffffffff,而物理地址空间即为内存的大小
+*** MMU
+MMU是memory management Unit内存管理单元，在cpu芯片上，一般存在于协处理器中，由一个或一组芯片组成，完成逻辑地址和物理地址的转换
+一般采用的是ＭＭＵ进行转换，但是在系统刚刚启动的时候由于页表ＴＬＢ等均没有初始化，且页表，ＴＬＢ都是由操作系统管理的，这时采用ＭＭＵ就不行了，采用的方法就是直接映射，直接映射主要用于 操作系统启动时的那块区域，
+即将６４位的虚拟地址高位去掉变成３２位的物理地址进行访问内存。ＭＭＵ被配置为指向页表的首地址
+也有采用多级页表的，如x86两级页表
+
+*** TLB
+TLB是translation look-aside buffers翻译后援缓冲器
+页表的实现对虚拟内存系统效率极为关键，在分页的机制下，访问一个地址需要至少两次访问内存，一次是对页表的访问，一次是对物理地址内的内容的访问，
+若每次访问一个地址都需要至少两次的内存访问，则会使系统的性能降低，因为不使用分页机制时每次只要一次访问内存即可。为了在分页机制下提高系统性能效率，
+引入ＴＬＢ的使用，原理是程序访问的局部性，在程序的执行过程中只有少量的页表项经常被用到，将经常使用的页表项放到ＴＬＢ中，由于ＴＬＢ的访问速度快于内存的访问，
+所以可以节约访问时间，提高系统性能。ＴＬＢ通常在ＭＭＵ内部，当ＣＰＵ把虚拟地址传到ＭＭＵ时，硬件首先并行比较ＴＬＢ中的各项，若找到则到相应的物理地址访问数据，
+若没有找到即ＴＬＢ不命中时，从页表中找到相应的页表项并替换ＴＬＢ中的一项，被替换的ＴＬＢ项若是被修改过则需要写回页表。ＴＬＢ中的数据和页表数据的相关性由操作系统维护。
+增大ＴＬＢ条目的数目可以增大命中率但是也会增加成本和相应的软件的开销，所以trade off一般选取ＴＬＢ的条目为８－６４
+效率：假设ＴＬＢ的命中率是0.85，访问内存的时间是120ns,访问TLB 的时间是15ns,则有TLB后的访问时间为：0.85*(120+15)+0.15*(15+120+120)=153ns,相对于原来的24
